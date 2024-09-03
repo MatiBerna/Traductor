@@ -13,12 +13,25 @@ app.get('/', (req, res) => {
 })
 
 app.post('/traducciones', async (req, res) => {
-  const traducciones = await Traduction.findAll()
+  let offset = 0
+  const limit = 10
+  let translatedTraducciones: Traduction[] = []
+  let traducciones: Traduction[] = []
 
-  const translatedTraducciones = await Promise.all(
-    traducciones.map(async (traduction) => {
-      const result = await translate(traduction.text, 'en', 'es')
-      if (result) {
+  do {
+    traducciones = await Traduction.findAll({
+      where: { language: 'english' },
+      limit,
+      offset,
+    })
+
+    const textsToTranslate = traducciones.map((traduction) => traduction.text).join('---')
+    const translationResult = await translate(textsToTranslate, 'en', 'es')
+    const translatedTexts = translationResult!.translation.split('---')
+
+    const translatedTraduccionesBatch = translatedTexts.map(async (translatedText, index) => {
+      const traduction = traducciones[index]
+      if (translatedText) {
         try {
           const existingTraduction = await Traduction.findOne({
             where: {
@@ -32,7 +45,7 @@ app.post('/traducciones', async (req, res) => {
           } else {
             const newTraduction = await Traduction.create({
               id: traduction.id,
-              text: result.translation,
+              text: translatedText,
               language: 'español',
             })
             return newTraduction
@@ -43,7 +56,12 @@ app.post('/traducciones', async (req, res) => {
       }
       return traduction
     })
-  )
+
+    const resolvedBatch = await Promise.all(translatedTraduccionesBatch)
+    translatedTraducciones = translatedTraducciones.concat(resolvedBatch)
+
+    offset += limit
+  } while (traducciones.length === limit)
 
   res.json(translatedTraducciones)
 })
